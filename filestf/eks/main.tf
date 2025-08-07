@@ -126,13 +126,14 @@ data "aws_subnet" "public_subnet_a" {
  }
 }
 
-data "aws_subnet" "private_subnet_a" {
+data "aws_subnet" "public_subnet_b" {
  vpc_id = data.aws_vpc.main.id
  filter {
     name = "tag:Name"
     values = ["Jumphost-subnet2"]
  }
 }
+
 data "aws_security_group" "selected" {
   vpc_id = data.aws_vpc.main.id
   filter {
@@ -141,13 +142,28 @@ data "aws_security_group" "selected" {
  }
 }
 
+resource "aws_subnet" "public_subnet_a" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "ap-south-1a"
+  map_public_ip_on_launch = true
+}
+
+resource "aws_subnet" "public_subnet_b" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.2.0/24"
+  availability_zone       = "ap-south-1b"
+  map_public_ip_on_launch = true
+}
+
+
  #Creating EKS Cluster
   resource "aws_eks_cluster" "eks" {
     name     = "project-eks"
     role_arn = aws_iam_role.master.arn
 
     vpc_config {
-      subnet_ids = [data.aws_subnet.public_subnet_a.id, data.aws_subnet.private_subnet_a.id]
+      subnet_ids = [data.aws_subnet.public_subnet_a.id, data.aws_subnet.public_subnet_b.id]
     }
 
     tags = {
