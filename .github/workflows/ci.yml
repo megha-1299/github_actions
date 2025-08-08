@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-# tu pagal hai
 jobs:
   plan:
     name: Terraform - fmt / validate / plan
