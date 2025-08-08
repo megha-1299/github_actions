@@ -1,46 +1,63 @@
-name: Terraform CI
+name: Deploy Terraform via EC2
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
-  terraform:
-    name: 'Terraform Plan & Apply'
+  deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          terraform_version: 1.7.5
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
 
-      - name: Terraform Init
-        run: terraform init
-        working-directory: filestf/eks
+      - name: Launch EC2 instance
+        id: launch
+        run: |
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --image-id ami-0f58b397bc5c1f2e8 \ # Ubuntu 22.04 LTS in ap-south-1
+            --count 1 \
+            --instance-type t2.micro \
+            --key-name demo-key \
+            --security-groups default \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Terraform-Runner}]' \
+            --query 'Instances[0].InstanceId' \
+            --output text)
 
-      - name: Terraform Validate
-        run: terraform validate
-        working-directory: filestf/eks
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
-      - name: Terraform Plan
-        run: terraform plan
-        working-directory: filestf/eks
+          echo "Waiting for instance to be running..."
+          aws ec2 wait instance-status-ok --instance-ids $INSTANCE_ID
 
-      # Optional: Add manual approval before apply
-      - name: Wait for Manual Approval
-        if: github.ref == 'refs/heads/main'
-        uses: hmarr/auto-approve-action@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
 
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
-        working-directory: filestf/eks
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Install Terraform and run plan/apply on EC2
+        run: |
+          echo "Connecting to EC2 and running Terraform..."
+          ssh -o StrictHostKeyChecking=no -i demo-key.pem ubuntu@${{ env.PUBLIC_IP }} << 'EOF'
+            sudo apt-get update -y
+            sudo apt-get install -y unzip curl git
+            curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
+            unzip terraform.zip
+            sudo mv terraform /usr/local/bin/
+            terraform -version
+
+            git clone https://github.com/${{ github.repository }} repo
+            cd repo
+            terraform init
+            terraform plan
+            terraform apply -auto-approve
+          EOF
+
+      - name: Output EC2 Public IP
+        run: echo "Terraform executed on EC2: ${{ env.PUBLIC_IP }}"
