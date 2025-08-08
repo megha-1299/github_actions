@@ -26,3 +26,4 @@ jobs:
           --security-group-ids sg-078a9fad9637fa3c7 \
           --subnet-id subnet-016de08d679a0a9e8 \
           --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=GitHubActionEC2}]'
+          --associate-public-ip-address
