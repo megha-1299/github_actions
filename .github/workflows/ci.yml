@@ -1,43 +1,18 @@
-name: Terraform CI
+- name: Terraform Init
+  run: terraform init
+  working-directory: filestf/eks
 
-on:
-  push:
-    branches:
-      - main
+- name: Terraform Validate
+  run: terraform validate
+  working-directory: filestf/eks
 
-jobs:
-  terraform:
-    name: 'Terraform Plan & Apply'
-    runs-on: ubuntu-latest
+- name: Terraform Plan
+  run: terraform plan
+  working-directory: filestf/eks
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.7.5
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan
-        run: terraform plan
-
-      # Optional: Add manual approval before apply
-      - name: Wait for Manual Approval
-        if: github.ref == 'refs/heads/main'
-        uses: hmarr/auto-approve-action@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
+- name: Terraform Apply
+  run: terraform apply -auto-approve
+  working-directory: filestf/eks
+  env:
+    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
