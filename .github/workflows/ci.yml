@@ -1,63 +1,78 @@
-name: Deploy Terraform via EC2
+name: Terraform CI
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
-  deploy:
+  plan:
+    name: Terraform - fmt / validate / plan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.7.5
+
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Launch EC2 instance
-        id: launch
-        run: |
-          INSTANCE_ID=$(aws ec2 run-instances \
-            --image-id ami-0f58b397bc5c1f2e8 \ # Ubuntu 22.04 LTS in ap-south-1
-            --count 1 \
-            --instance-type t2.micro \
-            --key-name demo-key \
-            --security-groups default \
-            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Terraform-Runner}]' \
-            --query 'Instances[0].InstanceId' \
-            --output text)
+      - name: Terraform fmt (check)
+        run: terraform fmt -check
+        working-directory: filestf/eks
 
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+      - name: Terraform init
+        run: terraform init
+        working-directory: filestf/eks
 
-          echo "Waiting for instance to be running..."
-          aws ec2 wait instance-status-ok --instance-ids $INSTANCE_ID
+      - name: Terraform validate
+        run: terraform validate
+        working-directory: filestf/eks
 
-          PUBLIC_IP=$(aws ec2 describe-instances \
-            --instance-ids $INSTANCE_ID \
-            --query 'Reservations[0].Instances[0].PublicIpAddress' \
-            --output text)
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+      - name: Terraform plan (save plan file)
+        run: terraform plan -out=tfplan
+        working-directory: filestf/eks
 
-      - name: Install Terraform and run plan/apply on EC2
-        run: |
-          echo "Connecting to EC2 and running Terraform..."
-          ssh -o StrictHostKeyChecking=no -i demo-key.pem ubuntu@${{ env.PUBLIC_IP }} << 'EOF'
-            sudo apt-get update -y
-            sudo apt-get install -y unzip curl git
-            curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-            unzip terraform.zip
-            sudo mv terraform /usr/local/bin/
-            terraform -version
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: filestf/eks/tfplan
 
-            git clone https://github.com/${{ github.repository }} repo
-            cd repo
-            terraform init
-            terraform plan
-            terraform apply -auto-approve
-          EOF
+  apply:
+    name: Terraform - apply (requires approval)
+    needs: plan
+    runs-on: ubuntu-latest
+    # This 'environment' pause forces repository administrators to configure required reviewers
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Output EC2 Public IP
-        run: echo "Terraform executed on EC2: ${{ env.PUBLIC_IP }}"
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: filestf/eks
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform apply (using saved plan)
+        run: terraform apply -input=false tfplan
+        working-directory: filestf/eks
